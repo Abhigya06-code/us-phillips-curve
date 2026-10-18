@@ -1,164 +1,192 @@
-import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestRegressor
+import streamlit as st
 
-st.set_page_config(page_title="US Phillips Curve", layout="wide")
+from src.config import (DATA_PATH, TARGETS, MODELS, FEATURE_LABELS, SLIDER_STEPS, ERAS, SERIES, ALL_FEATURES)
+from src.predict import load_artifacts, predict, out_of_range
 
-# ---------- Load data ----------
+st.set_page_config(page_title="US Phillips Curve Simulator", layout="wide")
+
+
 @st.cache_data
 def load_data():
-    df = pd.read_csv("us_phillips_data.csv", index_col=0, parse_dates=True)
-    return df
+    return pd.read_csv(DATA_PATH, index_col=0, parse_dates=True)
+
+
+@st.cache_resource
+def get_artifacts():
+    return load_artifacts()
+
 
 df = load_data()
+models, metrics = get_artifacts()
+ranges = metrics["slider_ranges"]
 
-# ---------- Train models (cached, trained once per session) ----------
-@st.cache_resource
-def train_models(df):
-    X_classic = df[["unemployment"]].values
-    X_aug = df[["unemployment", "mich"]].values
-    X_full = df[["unemployment", "mich", "fedfunds", "oil_wti", "m2sl"]].values
-    y = df["inflation_headline"].values
-
-    classic = LinearRegression().fit(X_classic, y)
-    augmented = LinearRegression().fit(X_aug, y)
-    rf = RandomForestRegressor(n_estimators=300, max_depth=5, random_state=42).fit(X_full, y)
-
-    r2_classic = classic.score(X_classic, y)
-    r2_aug = augmented.score(X_aug, y)
-    r2_rf = rf.score(X_full, y)
-
-    return classic, augmented, rf, r2_classic, r2_aug, r2_rf
-
-classic, augmented, rf, r2_classic, r2_aug, r2_rf = train_models(df)
-
-# ---------- Sidebar: scenario sliders ----------
+# ---------------- Sidebar ----------------
 st.sidebar.header("Adjust the scenario")
+target_label = st.sidebar.radio("Inflation measure", list(TARGETS))
+target = TARGETS[target_label]
 
-unemployment = st.sidebar.slider("Unemployment (%)", 3.0, 15.0, 4.0, 0.1)
-mich = st.sidebar.slider("Expected Inflation (%, Michigan survey)", 1.0, 11.0, 3.0, 0.1)
-fedfunds = st.sidebar.slider("Federal Funds Rate (%)", 0.0, 6.0, 2.0, 0.05)
-oil = st.sidebar.slider("WTI Oil Price ($)", 15.0, 135.0, 70.0, 1.0)
-m2sl = st.sidebar.slider(
-    "M2 Money Supply ($ billions)",
-    float(df["m2sl"].min()), float(df["m2sl"].max()), float(df["m2sl"].median()), 10.0
-)
+inputs = {}
+for f in ALL_FEATURES:
+    lo, hi, default = ranges[f]
+    inputs[f] = st.sidebar.slider(FEATURE_LABELS[f], float(lo), float(hi), float(default), SLIDER_STEPS[f])
 
+# ---------------- Header ----------------
 st.title("US Phillips Curve Simulator")
+if metrics.get("stub"):
+    st.warning("STUB DATA: synthetic placeholder numbers. Replace data/ and artifacts/ with the Colab outputs before presenting.")
 st.write(
-    "Built on US 2003\u20132026 macro data (FRED): compares the classic Phillips Curve, "
-    "an expectations-augmented version, and a Random Forest, to show why a central bank "
-    "can't rely on a single stable curve to control inflation."
+    "Built on US macro data from FRED. Compares the classic Phillips Curve, an expectations-augmented "
+    "version, an augmented model with supply and policy shocks, and a Random Forest, to show why a "
+    "central bank cannot rely on a single stable curve to control inflation."
 )
 
-tab1, tab2 = st.tabs(["Predictor", "Why the Classic Curve Fails"])
+tab1, tab2, tab3, tab4 = st.tabs(["Predictor", "Short-run & long-run curve", "Why the Classic Curve Fails", "Data, method & limits"])
 
-# ============================================================
-# TAB 1: Predictor
-# ============================================================
+# ============================================================ TAB 1
 with tab1:
     st.subheader("Model")
-    model_choice = st.radio(
-        "Choose a model",
-        ["Classic Phillips Curve", "Expectations-Augmented", "Random Forest (all variables)"],
-        horizontal=True,
+    keys = list(MODELS)
+    model_key = st.radio("Choose a model", keys, format_func=lambda k: MODELS[k][0], horizontal=True)
+    label, feats = MODELS[model_key]
+    mm = metrics["models"][target][model_key]
+
+    pred = predict(models, target, model_key, inputs)
+    st.caption(
+        f"Uses: {', '.join(FEATURE_LABELS[f] for f in feats)}. "
+        f"R\u00b2 in-sample = {mm['r2_in']:.2f}; out-of-sample (test {metrics['split']['test_start']} onward) = "
+        f"{mm['r2_oos']:.2f}, RMSE = {mm['rmse_oos']:.2f} pp."
     )
+    bad = out_of_range(metrics, inputs, feats)
+    if bad and model_key == "rf":
+        st.warning("Outside the training range for: " + ", ".join(FEATURE_LABELS[b] for b in bad) +
+                   ". A Random Forest cannot extrapolate, so this prediction is capped at the edge of what it has seen.")
+    elif bad:
+        st.info("Outside the training range for: " + ", ".join(FEATURE_LABELS[b] for b in bad) +
+                ". Linear models extrapolate, so treat this prediction with caution.")
 
-    if model_choice == "Classic Phillips Curve":
-        pred = classic.predict([[unemployment]])[0]
-        st.caption(f"Uses only unemployment. R\u00b2 \u2248 {r2_classic:.3f} \u2014 weak predictive power on its own.")
-    elif model_choice == "Expectations-Augmented":
-        pred = augmented.predict([[unemployment, mich]])[0]
-        st.caption(f"Uses unemployment + expected inflation. R\u00b2 \u2248 {r2_aug:.3f} \u2014 expectations do most of the work.")
-    else:
-        pred = rf.predict([[unemployment, mich, fedfunds, oil, m2sl]])[0]
-        st.caption(f"Uses all 5 variables via Random Forest. R\u00b2 \u2248 {r2_rf:.3f} on training data.")
+    st.metric(f"Predicted {target_label} inflation", f"{pred:.2f}%")
 
-    st.metric("Predicted Inflation", f"{pred:.2f}%")
-
-    # ---------- Historical chart with detailed, accurate annotations ----------
-    fig, ax = plt.subplots(figsize=(11, 6.5))
-    yearly = df["inflation_headline"].resample("YE").mean()
+    yearly = df.loc[metrics["sample"]["start"]:, target].dropna().resample("YE").mean()
     years = yearly.index.year
+    fig, ax = plt.subplots(figsize=(11, 6.5))
+    ax.plot(years, yearly.values, marker="o", color="#4C78A8", lw=1.8, ms=5, label="Historical inflation (annual avg)", zorder=3)
+    ax.axhline(pred, color="crimson", ls="--", lw=2.2, label=f"Your prediction ({pred:.2f}%)", zorder=2)
+    ax.scatter([years.max() + 1], [pred], color="crimson", s=130, marker="D", zorder=5)
+    ax.axhline(0, color="gray", lw=0.6)
+    ax.set_title(f"Model: {label}  |  Predicted {target_label}: {pred:.2f}%", fontsize=12, pad=12)
+    ax.set_xlabel("Year"); ax.set_ylabel("Inflation (% YoY)")
 
-    ax.plot(years, yearly.values, marker="o", color="#4C78A8", linewidth=1.8,
-            markersize=5, label="Historical Inflation", zorder=3)
-    ax.axhline(pred, color="crimson", linestyle="--", linewidth=2.2,
-               label=f"Your Prediction ({pred:.2f}%)", zorder=2)
-    ax.scatter([years.max() + 1], [pred], color="crimson", s=130, zorder=5, marker="D")
-
-    ax.set_title(f"Model: {model_choice}  |  Predicted Inflation: {pred:.2f}%", fontsize=12, pad=12)
-    ax.set_xlabel("Year")
-    ax.set_ylabel("Inflation (%)")
-    ax.axhline(0, color="gray", linewidth=0.6, zorder=1)
-
-    # Annotations: (year, label_text, xytext_offset)
-    annotations = [
-        (2009, "2008-09: Global Financial Crisis\nDemand collapse \u2192 inflation turns negative", (-4.5, -3.2)),
-        (2015, "2014-15: Oil price crash\n(shale oversupply) \u2192 near-zero inflation", (0.3, -2.6)),
-        (2020, "2020: COVID-19 lockdowns\nDemand shock, muted annual average", (-6, 3.0)),
-        (2022, "2022: Reopening demand surge +\nUkraine war oil shock \u2192 inflation peaks near 8%", (-9, 1.8)),
-        (2024, "2023-24: Aggressive Fed rate hikes\n(funds rate to ~5.3%) pull inflation back down", (0.4, 2.3)),
+    # (year, text, offset in points). Tune offsets by eye.
+    episodes = [
+        (2009, "2008-09: Global Financial Crisis\nDemand collapse \u2192 inflation turns negative", (-60, -70)),
+        (2015, "2014-15: Oil price crash\n(shale oversupply) \u2192 near-zero inflation", (10, -70)),
+        (2020, "2020: COVID-19 lockdowns\nDemand shock, muted annual average", (-150, 60)),
+        (2022, "2022: Reopening demand surge +\nUkraine war oil shock \u2192 inflation peaks", (-210, 10)),
+        (2024, "2023-24: Aggressive Fed rate hikes\npull inflation back down", (-20, 80)),
     ]
-
-    for year, text, (dx, dy) in annotations:
-        if year in years:
-            y_val = yearly[yearly.index.year == year].values[0]
-            ax.annotate(
-                text, xy=(year, y_val), xytext=(year + dx, y_val + dy),
-                fontsize=8, color="#333333",
-                arrowprops=dict(arrowstyle="->", color="gray", lw=1),
-                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.85),
-            )
-
+    for yr, text, off in episodes:
+        if yr in years:
+            yv = float(yearly[years == yr].iloc[0])
+            ax.annotate(text, xy=(yr, yv), xytext=off, textcoords="offset points", fontsize=8, color="#333333",
+                        arrowprops=dict(arrowstyle="->", color="gray", lw=1), annotation_clip=False,
+                        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.85))
     ax.legend(loc="upper left")
-    ax.set_ylim(yearly.min() - 4, yearly.max() + 4)
+    ax.set_ylim(min(yearly.min(), pred) - 3, max(yearly.max(), pred) + 3)
     plt.tight_layout()
     st.pyplot(fig)
+    st.caption("Annotations mark major US macro episodes and the demand/supply forces behind each swing.")
 
-    st.caption(
-        "Annotations mark major US macro episodes and the demand/supply-side forces "
-        "behind each inflation swing \u2014 useful talking points for explaining *why* "
-        "the curve doesn't hold steady."
-    )
-
-# ============================================================
-# TAB 2: Why the Classic Curve Fails
-# ============================================================
+# ============================================================ TAB 2
 with tab2:
+    st.subheader("Short-run curve and the natural rate")
+    st.write("Each dot is one month. The short-run curve is the fitted line; the long-run curve is vertical at the "
+             "CBO natural rate of unemployment (NROU), the level at which only expected inflation remains.")
+    era_labels = [e[0] for e in ERAS]
+    chosen = st.multiselect("Eras to include", era_labels, default=era_labels)
+
+    fig2, ax2 = plt.subplots(figsize=(10, 5.5))
+    cmap = plt.get_cmap("tab10")
+    pts = []
+    for i, (lab, s, e) in enumerate(ERAS):
+        if lab not in chosen:
+            continue
+        x = df.loc[s:e, ["unrate", target]].dropna()
+        ax2.scatter(x["unrate"], x[target], s=14, alpha=0.65, color=cmap(i), label=lab)
+        pts.append(x)
+    if pts:
+        allx = pd.concat(pts)
+        if len(allx) > 2:
+            b, a = np.polyfit(allx["unrate"], allx[target], 1)
+            xs = np.linspace(allx["unrate"].min(), allx["unrate"].max(), 50)
+            ax2.plot(xs, a + b * xs, color="black", lw=2, label=f"Short-run fit (slope {b:.2f})")
+    nrou = metrics["nrou"]
+    ax2.axvspan(nrou["min"], nrou["max"], color="gray", alpha=0.15, label="NROU range over history")
+    ax2.axvline(nrou["latest"], color="crimson", lw=2, label=f"Long-run curve at NROU = {nrou['latest']:.1f}%")
+    ax2.set_xlabel("Unemployment rate (%)"); ax2.set_ylabel(f"{target_label} inflation (% YoY)")
+    ax2.legend(fontsize=8, loc="upper right")
+    plt.tight_layout()
+    st.pyplot(fig2)
+
+# ============================================================ TAB 3
+with tab3:
     st.subheader("Why the Classic Curve Fails")
-    st.write(
-        "The classic Phillips Curve regresses inflation on unemployment alone, assuming "
-        "expected inflation stays fixed. Real US data spans eras where expected inflation "
-        "itself moved a lot (from ~10%+ in the early 1980s down to ~2% in the 2010s), so "
-        "pooling decades together washes out the slope."
-    )
+    st.write("Each block tests one hypothesis from Review 1 using the numbers computed in the Colab notebook.")
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Classic (unemployment only)", f"R\u00b2 = {r2_classic:.3f}")
-    col2.metric("Expectations-Augmented", f"R\u00b2 = {r2_aug:.3f}")
-    col3.metric("Random Forest (all 5 vars)", f"R\u00b2 = {r2_rf:.3f}")
+    st.markdown("**Model comparison** (train through " + metrics["split"]["train_end"] +
+                ", test from " + metrics["split"]["test_start"] + ")")
+    rows = [{"Model": MODELS[k][0], "R\u00b2 in-sample": v["r2_in"], "R\u00b2 out-of-sample": v["r2_oos"],
+             "RMSE out-of-sample (pp)": v["rmse_oos"]} for k, v in metrics["models"][target].items()]
+    st.dataframe(pd.DataFrame(rows).round(3))
 
-    st.write(
-        "The jump from the classic to the augmented model is the actual finding: unemployment "
-        "alone barely predicts inflation, but once expected inflation is included, the fit "
-        "improves sharply \u2014 which is why a central bank's main lever isn't just the policy "
-        "rate itself, but managing what the public *expects* inflation to be."
-    )
+    # H1
+    st.markdown("**H1: The curve is not one stable relationship.**")
+    sp = pd.DataFrame(metrics["subperiods"])
+    fig3, ax3 = plt.subplots(figsize=(9, 4))
+    ax3.bar(sp["era"], sp["slope_classic"], yerr=1.96 * sp["se_classic"], capsize=4, color="#4C78A8")
+    ax3.axhline(0, color="gray", lw=0.8)
+    ax3.set_ylabel("Slope of inflation on unemployment"); plt.xticks(rotation=20, ha="right")
+    plt.tight_layout(); st.pyplot(fig3)
+    st.caption(f"Classic slope ranges from {sp['slope_classic'].min():.2f} to {sp['slope_classic'].max():.2f} "
+               "across eras (bars show 95% intervals, HAC standard errors). Headline CPI used for the era test.")
 
-    st.markdown("**Key episodes that break the simple curve:**")
-    st.write(
-        "- **2008-09 Financial Crisis** \u2014 unemployment spiked, but so did deflation risk, "
-        "not the inflation the simple curve would predict at low unemployment periods nearby.\n"
-        "- **2014-15 oil price crash** \u2014 a pure supply-side shock (US shale boom pushed prices "
-        "down) that had nothing to do with unemployment, yet moved inflation to near zero.\n"
-        "- **2021-22 post-COVID surge** \u2014 unemployment was falling (which the classic curve "
-        "reads as inflationary), but the size of the inflation spike (up to 8%) was driven far "
-        "more by supply chain breakdowns and the Ukraine war oil shock than by labor market tightness.\n"
-        "- **2023-24 disinflation** \u2014 inflation fell back down even as unemployment stayed "
-        "historically low, contradicting the basic curve's tradeoff logic \u2014 credited largely "
-        "to the Fed's rate hikes cooling expectations rather than unemployment rising."
+    # H2
+    st.markdown("**H2: The natural rate is a moving target.**")
+    nr = df["nrou"].dropna()
+    fig4, ax4 = plt.subplots(figsize=(9, 3.5))
+    ax4.plot(nr.index, nr.values, label="NROU (CBO)")
+    ax4.plot(df.index, df["unrate"], alpha=0.5, label="Unemployment rate")
+    ax4.legend(); ax4.set_ylabel("%"); plt.tight_layout(); st.pyplot(fig4)
+    st.caption(f"NROU moves between {metrics['nrou']['min']:.1f}% and {metrics['nrou']['max']:.1f}%, "
+               "so the unemployment gap is an uncertain policy signal.")
+
+    # H3, H4
+    c1, c2 = st.columns(2)
+    o, ex = metrics["oil"], metrics["expectations"]
+    with c1:
+        st.markdown("**H3: Supply shocks shift the curve on their own.**")
+        st.metric("Out-of-sample R\u00b2 gain from adding oil", f"{o['r2_oos_gain']:+.3f}")
+        st.caption(f"Oil coefficient {o['coef_wti']:.3f} (t = {o['t_wti']:.1f}).")
+    with c2:
+        st.markdown("**H4: Expectations may matter more than the tradeoff.**")
+        st.metric("Out-of-sample R\u00b2 gain from adding expectations", f"{ex['r2_oos_gain']:+.3f}")
+        st.caption(f"Michigan coefficient {ex['coef_mich']:.3f} (t = {ex['t_mich']:.1f}).")
+
+# ============================================================ TAB 4
+with tab4:
+    st.subheader("Data")
+    st.table(pd.DataFrame({"Variable": list(SERIES), "FRED ID": list(SERIES.values())}))
+    st.write(f"Model sample: {metrics['sample']['start']} to {metrics['sample']['end']} "
+             f"({metrics['sample']['n']} monthly observations). Daily and quarterly series converted to monthly; "
+             "inflation is year-over-year; M2 enters as YoY growth.")
+    st.subheader("Limits")
+    st.markdown(
+        "- The Fed's policy rate responds to inflation, so it is context, not an independent cause.\n"
+        "- The natural rate is estimated (CBO), not observed.\n"
+        "- Policy works with lags, so a simulator cannot show timing.\n"
+        "- Monthly year-over-year inflation is highly persistent; we use HAC standard errors and out-of-sample tests.\n"
+        "- Random Forest cannot extrapolate beyond the data it has seen.\n"
+        "- Aggregate regressions can understate the true slope (Furlanetto & Lepetit, 2024)."
     )
