@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
 
-from src.config import (DATA_PATH, TARGETS, MODELS, FEATURE_LABELS, SLIDER_STEPS, ERAS, SERIES, ALL_FEATURES)
+from src.config import (DATA_PATH, TARGETS, MODELS, FEATURE_LABELS, SLIDER_STEPS, ERAS, ALL_FEATURES)
 from src.predict import load_artifacts, predict, out_of_range
 
 st.set_page_config(page_title="US Phillips Curve Simulator", layout="wide")
@@ -37,13 +37,8 @@ for f in ALL_FEATURES:
 st.title("US Phillips Curve Simulator")
 if metrics.get("stub"):
     st.warning("STUB DATA: synthetic placeholder numbers. Replace data/ and artifacts/ with the Colab outputs before presenting.")
-st.write(
-    "Built on US macro data from FRED. Compares the classic Phillips Curve, an expectations-augmented "
-    "version, an augmented model with supply and policy shocks, and a Random Forest, to show why a "
-    "central bank cannot rely on a single stable curve to control inflation."
-)
 
-tab1, tab2, tab3, tab4 = st.tabs(["Predictor", "Short-run & long-run curve", "Why the Classic Curve Fails", "Data, method & limits"])
+tab1, tab2 = st.tabs(["Predictor", "Short-run & long-run curve"])
 
 # ============================================================ TAB 1
 with tab1:
@@ -51,14 +46,23 @@ with tab1:
     keys = list(MODELS)
     model_key = st.radio("Choose a model", keys, format_func=lambda k: MODELS[k][0], horizontal=True)
     label, feats = MODELS[model_key]
-    mm = metrics["models"][target][model_key]
 
     pred = predict(models, target, model_key, inputs)
-    st.caption(
-        f"Uses: {', '.join(FEATURE_LABELS[f] for f in feats)}. "
-        f"R\u00b2 in-sample = {mm['r2_in']:.2f}; out-of-sample (test {metrics['split']['test_start']} onward) = "
-        f"{mm['r2_oos']:.2f}, RMSE = {mm['rmse_oos']:.2f} pp."
-    )
+
+    inputs_text = ", ".join(FEATURE_LABELS[f] for f in feats)
+    if model_key == "classic":
+        how = "A straight-line regression of inflation on unemployment alone: the basic tradeoff."
+    elif model_key == "augmented":
+        how = "A linear regression that adds household inflation expectations to the unemployment tradeoff."
+    elif model_key == "full_ols":
+        how = "A linear regression that adds the policy rate, oil price and money growth as supply and policy shocks."
+    else:
+        rp = metrics.get("rf_params", {}).get(target, {})
+        rf_txt = (f" Settings for this measure: max depth {rp['max_depth']}, min leaf size {rp['min_samples_leaf']}."
+                  if "max_depth" in rp and "min_samples_leaf" in rp else "")
+        how = ("A Random Forest that learns non-linear patterns across all variables but cannot extrapolate "
+               "beyond the data it has seen." + rf_txt)
+    st.caption(f"Parameters used: {inputs_text}. {how}")
     bad = out_of_range(metrics, inputs, feats)
     if bad and model_key == "rf":
         st.warning("Outside the training range for: " + ", ".join(FEATURE_LABELS[b] for b in bad) +
@@ -97,7 +101,6 @@ with tab1:
     ax.set_ylim(min(yearly.min(), pred) - 3, max(yearly.max(), pred) + 3)
     plt.tight_layout()
     st.pyplot(fig)
-    st.caption("Annotations mark major US macro episodes and the demand/supply forces behind each swing.")
 
 # ============================================================ TAB 2
 with tab2:
@@ -129,64 +132,3 @@ with tab2:
     ax2.legend(fontsize=8, loc="upper right")
     plt.tight_layout()
     st.pyplot(fig2)
-
-# ============================================================ TAB 3
-with tab3:
-    st.subheader("Why the Classic Curve Fails")
-    st.write("Each block tests one hypothesis from Review 1 using the numbers computed in the Colab notebook.")
-
-    st.markdown("**Model comparison** (train through " + metrics["split"]["train_end"] +
-                ", test from " + metrics["split"]["test_start"] + ")")
-    rows = [{"Model": MODELS[k][0], "R\u00b2 in-sample": v["r2_in"], "R\u00b2 out-of-sample": v["r2_oos"],
-             "RMSE out-of-sample (pp)": v["rmse_oos"]} for k, v in metrics["models"][target].items()]
-    st.dataframe(pd.DataFrame(rows).round(3))
-
-    # H1
-    st.markdown("**H1: The curve is not one stable relationship.**")
-    sp = pd.DataFrame(metrics["subperiods"])
-    fig3, ax3 = plt.subplots(figsize=(9, 4))
-    ax3.bar(sp["era"], sp["slope_classic"], yerr=1.96 * sp["se_classic"], capsize=4, color="#4C78A8")
-    ax3.axhline(0, color="gray", lw=0.8)
-    ax3.set_ylabel("Slope of inflation on unemployment"); plt.xticks(rotation=20, ha="right")
-    plt.tight_layout(); st.pyplot(fig3)
-    st.caption(f"Classic slope ranges from {sp['slope_classic'].min():.2f} to {sp['slope_classic'].max():.2f} "
-               "across eras (bars show 95% intervals, HAC standard errors). Headline CPI used for the era test.")
-
-    # H2
-    st.markdown("**H2: The natural rate is a moving target.**")
-    nr = df["nrou"].dropna()
-    fig4, ax4 = plt.subplots(figsize=(9, 3.5))
-    ax4.plot(nr.index, nr.values, label="NROU (CBO)")
-    ax4.plot(df.index, df["unrate"], alpha=0.5, label="Unemployment rate")
-    ax4.legend(); ax4.set_ylabel("%"); plt.tight_layout(); st.pyplot(fig4)
-    st.caption(f"NROU moves between {metrics['nrou']['min']:.1f}% and {metrics['nrou']['max']:.1f}%, "
-               "so the unemployment gap is an uncertain policy signal.")
-
-    # H3, H4
-    c1, c2 = st.columns(2)
-    o, ex = metrics["oil"], metrics["expectations"]
-    with c1:
-        st.markdown("**H3: Supply shocks shift the curve on their own.**")
-        st.metric("Out-of-sample R\u00b2 gain from adding oil", f"{o['r2_oos_gain']:+.3f}")
-        st.caption(f"Oil coefficient {o['coef_wti']:.3f} (t = {o['t_wti']:.1f}).")
-    with c2:
-        st.markdown("**H4: Expectations may matter more than the tradeoff.**")
-        st.metric("Out-of-sample R\u00b2 gain from adding expectations", f"{ex['r2_oos_gain']:+.3f}")
-        st.caption(f"Michigan coefficient {ex['coef_mich']:.3f} (t = {ex['t_mich']:.1f}).")
-
-# ============================================================ TAB 4
-with tab4:
-    st.subheader("Data")
-    st.table(pd.DataFrame({"Variable": list(SERIES), "FRED ID": list(SERIES.values())}))
-    st.write(f"Model sample: {metrics['sample']['start']} to {metrics['sample']['end']} "
-             f"({metrics['sample']['n']} monthly observations). Daily and quarterly series converted to monthly; "
-             "inflation is year-over-year; M2 enters as YoY growth.")
-    st.subheader("Limits")
-    st.markdown(
-        "- The Fed's policy rate responds to inflation, so it is context, not an independent cause.\n"
-        "- The natural rate is estimated (CBO), not observed.\n"
-        "- Policy works with lags, so a simulator cannot show timing.\n"
-        "- Monthly year-over-year inflation is highly persistent; we use HAC standard errors and out-of-sample tests.\n"
-        "- Random Forest cannot extrapolate beyond the data it has seen.\n"
-        "- Aggregate regressions can understate the true slope (Furlanetto & Lepetit, 2024)."
-    )

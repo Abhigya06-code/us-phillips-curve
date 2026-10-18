@@ -354,5 +354,149 @@
         "min_samples_leaf": 15
       }
     }
+  },
+  "hybrid": {
+    "cpi_yoy": {
+      "Classic": {
+        "features": [
+          "unrate"
+        ],
+        "r2_in": 0.18413218165785916,
+        "r2_oos": -0.17848775307496245,
+        "rmse_oos": 2.382219508486244,
+        "r2_roll": 0.10176442941461439,
+        "rmse_roll": 1.9672550128122972
+      },
+      "Expectations-augmented": {
+        "features": [
+          "unrate",
+          "mich"
+        ],
+        "r2_in": 0.5663022487029423,
+        "r2_oos": 0.5086582208117354,
+        "rmse_oos": 1.5381939082494918,
+        "r2_roll": 0.47761870877565127,
+        "rmse_roll": 1.500235172801947
+      },
+      "Last month's inflation only": {
+        "features": [
+          "lag1"
+        ],
+        "r2_in": 0.9342411230503637,
+        "r2_oos": 0.9561464345490664,
+        "rmse_oos": 0.45953828003545777,
+        "r2_roll": 0.9647216695364061,
+        "rmse_roll": 0.38986975755053693
+      },
+      "+ unemployment": {
+        "features": [
+          "lag1",
+          "unrate"
+        ],
+        "r2_in": 0.934423581835197,
+        "r2_oos": 0.9566423055151733,
+        "rmse_oos": 0.4569327961144418,
+        "r2_roll": 0.9641622614524434,
+        "rmse_roll": 0.3929486800971344
+      },
+      "+ unemployment + expectations": {
+        "features": [
+          "lag1",
+          "unrate",
+          "mich"
+        ],
+        "r2_in": 0.9383640763545277,
+        "r2_oos": 0.9578407588695925,
+        "rmse_oos": 0.45057348642442724,
+        "r2_roll": 0.9601695820446037,
+        "rmse_roll": 0.414259968455543
+      },
+      "+ all five variables": {
+        "features": [
+          "lag1",
+          "unrate",
+          "mich",
+          "fedfunds",
+          "wti",
+          "m2_yoy"
+        ],
+        "r2_in": 0.9417257581817502,
+        "r2_oos": 0.9084756507199195,
+        "rmse_oos": 0.6638769115497984,
+        "r2_roll": 0.9526734900831653,
+        "rmse_roll": 0.4515624028044085
+      }
+    },
+    "core_yoy": {
+      "Classic": {
+        "features": [
+          "unrate"
+        ],
+        "r2_in": 0.2965927099627682,
+        "r2_oos": -0.6671523541903241,
+        "rmse_oos": 1.9386233450780295,
+        "r2_roll": 0.24586124135802212,
+        "rmse_roll": 1.3174923635212652
+      },
+      "Expectations-augmented": {
+        "features": [
+          "unrate",
+          "mich"
+        ],
+        "r2_in": 0.5424546782464018,
+        "r2_oos": -0.33122740423672337,
+        "rmse_oos": 1.7323351513514884,
+        "r2_roll": 0.4127892122166634,
+        "rmse_roll": 1.1625710083011958
+      },
+      "Last month's inflation only": {
+        "features": [
+          "lag1"
+        ],
+        "r2_in": 0.9759103254860926,
+        "r2_oos": 0.9649682381360009,
+        "rmse_oos": 0.2810197112636533,
+        "r2_roll": 0.9779822656150151,
+        "rmse_roll": 0.22511725778696992
+      },
+      "+ unemployment": {
+        "features": [
+          "lag1",
+          "unrate"
+        ],
+        "r2_in": 0.9761200012649186,
+        "r2_oos": 0.9627487088352407,
+        "rmse_oos": 0.2897853715877971,
+        "r2_roll": 0.9771683632424544,
+        "rmse_roll": 0.22924031625942132
+      },
+      "+ unemployment + expectations": {
+        "features": [
+          "lag1",
+          "unrate",
+          "mich"
+        ],
+        "r2_in": 0.9772845201556678,
+        "r2_oos": 0.964325957041036,
+        "rmse_oos": 0.2835841532522429,
+        "r2_roll": 0.9780482585049587,
+        "rmse_roll": 0.22477963705811824
+      },
+      "+ all five variables": {
+        "features": [
+          "lag1",
+          "unrate",
+          "mich",
+          "fedfunds",
+          "wti",
+          "m2_yoy"
+        ],
+        "r2_in": 0.9794342916375508,
+        "r2_oos": 0.9538756502228123,
+        "rmse_oos": 0.32245634104327014,
+        "r2_roll": 0.9777802790512226,
+        "rmse_roll": 0.22614749212780544
+      }
+    }
   }
 }
