@@ -71,7 +71,7 @@ st.markdown(
     .stApp [data-testid="stAlert"] p {{ color: inherit; }}
     header[data-testid="stHeader"] * {{ color: {INK}; }}
     label[data-testid="stRadioOption"] > div > div:first-child {{ background-color: {BG}; border-color: {MUTED}; }}
-    label[data-testid="stRadioOption"][data-selected="true"] > div > div:first-child {{ background-color: {GREEN}; border-color: {GREEN}; }}
+    label[data-testid="stRadioOption"][data-selected="true"] > div > div:first-child {{ background-color: {INK}; border-color: {INK}; }}
     [data-testid="stSlider"] div[data-rac][style*="translate"] {{ background-color: {GREEN}; }}
     </style>
     """,
