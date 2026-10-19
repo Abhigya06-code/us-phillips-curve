@@ -157,8 +157,9 @@ if "scenario_init" not in st.session_state:
 
 # ---------------------------------------------------------------- sidebar
 st.sidebar.markdown("### Scenario")
-target_label = st.sidebar.radio("Inflation measure", list(TARGETS), horizontal=True)
+target_label = "Headline CPI"
 target = TARGETS[target_label]
+st.sidebar.caption("Inflation measure: headline CPI. Core CPI is hard to forecast for every model, so we report headline only.")
 
 inputs = {}
 for f in ALL_FEATURES:
