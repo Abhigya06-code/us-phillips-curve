@@ -1,11 +1,6 @@
-import io
-import time
-from concurrent.futures import ThreadPoolExecutor, wait
-
 import altair as alt
 import numpy as np
 import pandas as pd
-import requests
 import streamlit as st
 
 from src.config import (DATA_PATH, TARGETS, MODELS, FEATURE_LABELS, SLIDER_STEPS, ERAS, ALL_FEATURES)
@@ -111,87 +106,14 @@ def get_artifacts():
     return load_artifacts()
 
 
-FRED_URLS = ["https://fred.stlouisfed.org/graph/fredgraph.csv", "https://fred.stlouisfed.org/graphs/fredgraph.csv"]
-LIVE_IDS = {"unrate": "UNRATE", "mich": "MICH", "fedfunds": "FEDFUNDS", "wti": "DCOILWTICO",
-            "m2": "M2SL", "cpi": "CPIAUCSL", "core": "CPILFESL"}
-SHORT = {"unrate": ("Unemployment", "%"), "mich": ("Expected inflation", "%"), "fedfunds": ("Fed funds rate", "%"),
-         "wti": ("WTI oil", "$"), "m2_yoy": ("M2 growth", "%")}
-
-
-def _get_series(sid, start):
-    """One FRED series via the public CSV endpoint (no API key). Tries both URLs once each."""
-    last = "unknown error"
-    for url in FRED_URLS:
-        try:
-            r = requests.get(url, params={"id": sid, "cosd": start}, timeout=(4, 8),
-                             headers={"User-Agent": "Mozilla/5.0 (compatible; phillips-simulator)"})
-            r.raise_for_status()
-            raw = pd.read_csv(io.StringIO(r.text))
-            s = pd.Series(pd.to_numeric(raw.iloc[:, 1], errors="coerce").values,
-                          index=pd.to_datetime(raw.iloc[:, 0], errors="coerce")).dropna()
-            if len(s):
-                return s, None
-            last = "empty response"
-        except Exception as e:                          # keep the reason so it can be shown in the sidebar
-            last = f"{type(e).__name__}: {str(e)[:90]}"
-    return None, last
-
-
-@st.cache_data(ttl=3 * 3600, show_spinner=False)
-def fetch_live():
-    """Latest observations of every series, waiting at most 12 seconds in total.
-    Raises if nothing arrived, so failures are never cached."""
-    start = (pd.Timestamp.today() - pd.DateOffset(months=30)).strftime("%Y-%m-%d")
-    ex = ThreadPoolExecutor(max_workers=len(LIVE_IDS))
-    futs = {k: ex.submit(_get_series, sid, start) for k, sid in LIVE_IDS.items()}
-    wait(list(futs.values()), timeout=12)
-    ex.shutdown(wait=False, cancel_futures=True)
-    data, errors = {}, {}
-    for k, f in futs.items():
-        if f.done():
-            data[k], err = f.result()
-            if err:
-                errors[k] = err
-        else:
-            data[k], errors[k] = None, "timed out"
-    if all(v is None for v in data.values()):
-        raise RuntimeError(next(iter(errors.values()), "FRED not reachable"))
-    return data, errors
-
-
-def build_latest(df):
-    """Latest value of every scenario input and of both inflation measures.
-    Live from FRED when reachable, otherwise the last values of the saved dataset.
-    Returns ({name: (value, date, is_live)}, number_of_live_series)."""
-    raw, errors = {}, {}
-    last_fail = st.session_state.get("fred_fail_at", 0)
-    if time.time() - last_fail > 120:                   # after a failure, wait 2 minutes before trying again
-        try:
-            raw, errors = fetch_live()
-            st.session_state.pop("fred_fail_at", None)
-        except Exception as e:
-            st.session_state["fred_fail_at"] = time.time()
-            st.session_state["fred_error"] = f"{type(e).__name__}: {str(e)[:120]}"
-    st.session_state["fred_errors"] = errors
-
-    def saved(name):
-        s = df[name].dropna()
-        return float(s.iloc[-1]), s.index[-1], False
-
-    def yoy(s):
-        return None if s is None else (s.pct_change(12) * 100).dropna()
-
-    out, n_live = {}, 0
-    sources = {"unrate": raw.get("unrate"), "mich": raw.get("mich"), "fedfunds": raw.get("fedfunds"),
-               "wti": raw.get("wti"), "m2_yoy": yoy(raw.get("m2")),
-               "cpi_yoy": yoy(raw.get("cpi")), "core_yoy": yoy(raw.get("core"))}
-    for name, s in sources.items():
-        if s is not None and len(s):
-            out[name] = (float(s.iloc[-1]), s.index[-1], True)
-            n_live += 1
-        else:
-            out[name] = saved(name)
-    return out, n_live
+def build_default_scenario(df):
+    """Starting values: the latest observation of every input and of both inflation measures in the saved dataset.
+    Computed once per session, when the app opens."""
+    out = {}
+    for name in list(ALL_FEATURES) + list(TARGETS.values()):
+        series = df[name].dropna()
+        out[name] = (float(series.iloc[-1]), series.index[-1])
+    return out
 
 
 def fmt_date(name, d):
@@ -208,26 +130,12 @@ models, metrics = get_artifacts()
 ranges = metrics["slider_ranges"]
 
 # ---------------------------------------------------------------- scenario state
-apply_latest = st.session_state.pop("apply_latest", False)
-if apply_latest:
-    fetch_live.clear()                      # "Latest data" pulls fresh numbers
-with st.spinner("Loading latest data..."):
-    latest, n_live = build_latest(df)
-
-if apply_latest or "scenario_init" not in st.session_state:
+latest = build_default_scenario(df)
+if "scenario_init" not in st.session_state:
     for f in ALL_FEATURES:
         lo, hi, _ = ranges[f]
         st.session_state[f"s_{f}"] = snap(latest[f][0], lo, hi, SLIDER_STEPS[f])
     st.session_state["scenario_init"] = True
-
-
-def _request_latest():
-    st.session_state["apply_latest"] = True
-
-
-def _typical_values():
-    for f in ALL_FEATURES:
-        st.session_state[f"s_{f}"] = float(ranges[f][2])
 
 
 # ---------------------------------------------------------------- sidebar
@@ -240,29 +148,6 @@ for f in ALL_FEATURES:
     lo, hi, _ = ranges[f]
     inputs[f] = st.sidebar.slider(FEATURE_LABELS[f], float(lo), float(hi), step=SLIDER_STEPS[f], key=f"s_{f}")
 
-b1, b2 = st.sidebar.columns(2)
-b1.button("Latest data", on_click=_request_latest, type="primary", use_container_width=True)
-b2.button("Typical values", on_click=_typical_values, use_container_width=True)
-
-if n_live > 0:
-    st.sidebar.caption(f"Live from FRED: {n_live} of {len(latest)} series.")
-    for k, msg in st.session_state.get("fred_errors", {}).items():
-        st.sidebar.caption(f"{k}: {msg}")
-else:
-    st.sidebar.caption("FRED could not be reached, so sliders start at the saved dataset. Press Latest data to retry.")
-    if st.session_state.get("fred_error"):
-        st.sidebar.caption(f"Reason: {st.session_state['fred_error']}")
-with st.sidebar.expander("Latest values"):
-    rows = ""
-    for f in ALL_FEATURES:
-        v, d, live = latest[f]
-        name, unit = SHORT[f]
-        shown = f"${v:,.2f}" if unit == "$" else f"{v:.2f}%"
-        rows += f"<tr><td>{name}</td><td class='r'>{shown}</td><td class='r'>{fmt_date(f, d)}{'' if live else '*'}</td></tr>"
-    st.markdown(f"<table class='t side'><tr><th>Series</th><th class='r'>Value</th><th class='r'>As of</th></tr>{rows}</table>",
-                unsafe_allow_html=True)
-    if n_live < len(latest):
-        st.caption("* saved dataset value")
 
 # ---------------------------------------------------------------- header
 st.markdown("<h1 class='title'>US Phillips Curve Simulator</h1>"
@@ -279,7 +164,7 @@ st.markdown(f"<div class='muted' style='margin:-.3rem 0 1rem'>Uses: {', '.join(F
             unsafe_allow_html=True)
 
 pred = predict(models, target, model_key, inputs)
-actual, actual_date, actual_live = latest[target]
+actual, actual_date = latest[target]
 diff = pred - actual
 
 bad = out_of_range(metrics, inputs, feats)
@@ -317,7 +202,7 @@ st.markdown(
       <div class="dotp" style="left:{pos(pred):.2f}%"></div><div class="dota" style="left:{pos(actual):.2f}%"></div>
       <div class="mk pred" style="left:{pos(pred):.2f}%"><div class="v">{pred:.2f}%</div><div class="t">{label}</div></div>
       <div class="mk act" style="left:{pos(actual):.2f}%"><div class="v">{actual:.2f}%</div>
-        <div class="t">Actual, {fmt_date(target, actual_date)}{'' if actual_live else ' (saved)'}</div></div>
+        <div class="t">Actual, {fmt_date(target, actual_date)}</div></div>
     </div>
     <p class="verdict" style="margin-top:.2rem">{verdict}</p></div>
     """,
