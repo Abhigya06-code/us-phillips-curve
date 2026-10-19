@@ -106,6 +106,23 @@ def get_artifacts():
     return load_artifacts()
 
 
+SHORT = {"unrate": "Unemployment", "mich": "Expected inflation", "fedfunds": "Fed funds rate", "wti": "Oil price", "m2_yoy": "M2 growth"}
+
+
+@st.cache_data
+def importance_shares(target, model_key):
+    """Share (%) of each variable in a model's fit: how much R2 drops on the 2003-2018 training data when that
+    variable is shuffled (permutation importance), scaled to add up to 100. Independent of the sliders."""
+    from sklearn.inspection import permutation_importance
+    feats = MODELS[model_key][1]
+    tr = load_data().loc["2003-01":"2018-12", feats + [target]].dropna()
+    res = permutation_importance(get_artifacts()[0][f"{target}:{model_key}"], tr[feats], tr[target],
+                                 scoring="r2", n_repeats=30, random_state=0)
+    raw = [max(float(v), 0.0) for v in res.importances_mean]
+    tot = sum(raw) or 1.0
+    return sorted(((f, 100 * r / tot) for f, r in zip(feats, raw)), key=lambda x: -x[1])
+
+
 def build_default_scenario(df):
     """Starting values: the latest observation of every input and of both inflation measures in the saved dataset.
     Computed once per session, when the app opens."""
@@ -168,6 +185,7 @@ actual, actual_date = latest[target]
 diff = pred - actual
 
 # the result
+imp_text = ", ".join(f"{SHORT[f]} ({v:.0f}%)" for f, v in importance_shares(target, model_key))
 if abs(diff) < 0.25:
     verdict = "The model lands close to actual inflation."
 elif diff > 0:
@@ -177,7 +195,8 @@ else:
 st.markdown(
     f"""
     <div class="result"><p class="verdict">{verdict}</p>
-    <p class="nums">{label} predicts {pred:.2f}%  |  Actual {actual:.2f}% ({fmt_date(target, actual_date)})</p></div>
+    <p class="nums">{label} predicts {pred:.2f}%  |  Actual {actual:.2f}% ({fmt_date(target, actual_date)})</p>
+    <p class="nums" style="margin-top:.35rem">Variables (share of the model's fit): {imp_text}</p></div>
     """,
     unsafe_allow_html=True,
 )
