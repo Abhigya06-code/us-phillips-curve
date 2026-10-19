@@ -167,11 +167,6 @@ pred = predict(models, target, model_key, inputs)
 actual, actual_date = latest[target]
 diff = pred - actual
 
-bad = out_of_range(metrics, inputs, feats)
-if bad and model_key == "rf":
-    st.warning("Outside the training range for: " + ", ".join(FEATURE_LABELS[b] for b in bad) +
-               ". A Random Forest cannot extrapolate, so this prediction is capped at the edge of what it has seen.")
-
 # the result
 if abs(diff) < 0.25:
     verdict = "The model lands close to actual inflation."
