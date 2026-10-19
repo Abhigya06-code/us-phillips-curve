@@ -106,6 +106,23 @@ def get_artifacts():
     return load_artifacts()
 
 
+SHORT = {"unrate": "Unemployment", "mich": "Expected inflation", "fedfunds": "Fed funds rate", "wti": "Oil price", "m2_yoy": "M2 growth"}
+
+
+@st.cache_data
+def importance_shares(target, model_key):
+    """Share (%) of each variable in a model's fit: how much R2 drops on the 2003-2018 training data when that
+    variable is shuffled (permutation importance), scaled to add up to 100. Independent of the sliders."""
+    from sklearn.inspection import permutation_importance
+    feats = MODELS[model_key][1]
+    tr = load_data().loc["2003-01":"2018-12", feats + [target]].dropna()
+    res = permutation_importance(get_artifacts()[0][f"{target}:{model_key}"], tr[feats], tr[target],
+                                 scoring="r2", n_repeats=30, random_state=0)
+    raw = [max(float(v), 0.0) for v in res.importances_mean]
+    tot = sum(raw) or 1.0
+    return sorted(((f, 100 * r / tot) for f, r in zip(feats, raw)), key=lambda x: -x[1])
+
+
 def build_default_scenario(df):
     """Starting values: the latest observation of every input and of both inflation measures in the saved dataset.
     Computed once per session, when the app opens."""
@@ -163,24 +180,12 @@ label, feats = MODELS[model_key]
 st.markdown(f"<div class='muted' style='margin:-.3rem 0 1rem'>Uses: {', '.join(FEATURE_LABELS[f] for f in feats)}</div>",
             unsafe_allow_html=True)
 
-def _r2_cell(v):
-    return f"{v:.2f}".replace("-", "\u2212")
-_hl = f"style='font-weight:700;background:{PANEL}'"
-_rows = "".join(
-    f"<tr {_hl if k == model_key else ''}><td>{MODELS[k][0]}</td>"
-    f"<td class='r'>{_r2_cell(metrics['models'][target][k]['r2_in'])}</td>"
-    f"<td class='r'>{_r2_cell(metrics['models'][target][k]['r2_oos'])}</td></tr>" for k in keys)
-st.markdown(
-    f"<table class='t side'><tr><th>{target_label} model</th><th class='r'>R\u00b2 in-sample</th>"
-    f"<th class='r'>R\u00b2 out-of-sample</th></tr>{_rows}</table>"
-    f"<div class='muted' style='margin:.35rem 0 1rem'>In-sample: 2003 to 2018 training data. Out-of-sample: unseen data from 2019. "
-    f"Below 0 means worse than predicting the test-period average.</div>", unsafe_allow_html=True)
-
 pred = predict(models, target, model_key, inputs)
 actual, actual_date = latest[target]
 diff = pred - actual
 
 # the result
+imp_text = ", ".join(f"{SHORT[f]} ({v:.0f}%)" for f, v in importance_shares(target, model_key))
 if abs(diff) < 0.25:
     verdict = "The model lands close to actual inflation."
 elif diff > 0:
@@ -190,7 +195,8 @@ else:
 st.markdown(
     f"""
     <div class="result"><p class="verdict">{verdict}</p>
-    <p class="nums">{label} predicts {pred:.2f}%  |  Actual {actual:.2f}% ({fmt_date(target, actual_date)})</p></div>
+    <p class="nums">{label} predicts {pred:.2f}%  |  Actual {actual:.2f}% ({fmt_date(target, actual_date)})</p>
+    <p class="nums" style="margin-top:.35rem">Variables (share of the model's fit): {imp_text}</p></div>
     """,
     unsafe_allow_html=True,
 )
