@@ -10,8 +10,13 @@ st.set_page_config(page_title="US Phillips Curve Simulator", layout="wide")
 
 # ---------------------------------------------------------------- look
 # Dollar green carries structure, blue is always "your scenario", ink is always "what actually happened".
-GREEN, BLUE, INK, MUTED = "#0F5A46", "#2457F5", "#1C2420", "#6A7670"
-PANEL, RULE, AMBER, RED = "#EEF3F0", "#D5DDD8", "#C98A00", "#C8402B"
+dark = st.sidebar.toggle("Dark mode", key="dark")
+if dark:
+    BG, GREEN, BLUE, INK, MUTED = "#0E1512", "#4CC9A0", "#7B97FF", "#E8EEEA", "#9AA8A1"
+    PANEL, RULE, AMBER, RED, GRID, SIDE = "#18231E", "#2E3B35", "#E0A92E", "#F0745F", "#24312B", "#131C18"
+else:
+    BG, GREEN, BLUE, INK, MUTED = "#FFFFFF", "#0F5A46", "#2457F5", "#1C2420", "#6A7670"
+    PANEL, RULE, AMBER, RED, GRID, SIDE = "#EEF3F0", "#D5DDD8", "#C98A00", "#C8402B", "#E6ECE8", "#EEF3F0"
 FONT = "Hanken Grotesk, Helvetica Neue, Arial, sans-serif"
 
 st.markdown(
@@ -30,33 +35,15 @@ st.markdown(
     h2.h {{ font-family: 'Bricolage Grotesque', sans-serif; font-weight: 700; font-size: 1.35rem;
             letter-spacing: -0.015em; margin: 2rem 0 .6rem; padding: 0; }}
 
-    /* the scale: the one thing on this page that is custom */
-    .scale {{ background: {PANEL}; border-radius: 6px; padding: 22px 34px 14px; margin-bottom: .4rem; }}
-    .track {{ position: relative; height: 212px; }}
-    .axis {{ position: absolute; left: 0; right: 0; top: 108px; height: 2px; background: {INK}; }}
-    .gap {{ position: absolute; top: 105px; height: 8px; background: {BLUE}; opacity: .28; border-radius: 4px; }}
-    .tick {{ position: absolute; top: 110px; background: {PANEL}; z-index: 1; transform: translateX(-50%); font-size: .74rem; color: {MUTED};
-             font-variant-numeric: tabular-nums; padding-top: 5px; }}
-    .tick:before {{ content: ""; position: absolute; left: 50%; top: 0; height: 5px; width: 1px; background: {MUTED}; }}
-    .target {{ position: absolute; top: 4px; bottom: 6px; width: 0; border-left: 2px dashed {GREEN}; }}
-    .target span {{ position: absolute; top: 0; left: 8px; font-size: .78rem; font-weight: 600; color: {GREEN};
-                    white-space: nowrap; }}
-    .mk {{ position: absolute; transform: translateX(-50%); text-align: center; white-space: nowrap; }}
-    .mk .v {{ font-family: 'Bricolage Grotesque', sans-serif; font-weight: 800; font-size: 2.3rem;
-              letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }}
-    .mk .t {{ font-size: .8rem; font-weight: 600; margin-top: 3px; }}
-    .mk.pred {{ top: 36px; color: {BLUE}; }}
-    .mk.pred:after {{ content: ""; position: absolute; left: 50%; top: 66px; width: 2px; height: 26px; background: {BLUE}; }}
-    .mk.act {{ top: 120px; padding-top: 30px; color: {INK}; }}
-    .mk.act:before {{ content: ""; position: absolute; left: 50%; top: -1px; width: 2px; height: 30px; background: {INK}; }}
-    .dotp, .dota {{ position: absolute; top: 101px; width: 16px; height: 16px; transform: translateX(-50%); border-radius: 50%; }}
-    .dotp {{ background: {BLUE}; }} .dota {{ background: {INK}; }}
-    p.verdict {{ margin: .9rem 0 0; font-size: 1.02rem; }}
-    p.verdict b {{ font-weight: 700; }}
+    /* the result */
+    .result {{ background: {PANEL}; border-radius: 6px; padding: 22px 28px; margin-bottom: .4rem; }}
+    .result .verdict {{ font-family: 'Bricolage Grotesque', sans-serif; font-weight: 700; font-size: 1.55rem;
+                        letter-spacing: -0.015em; line-height: 1.25; margin: 0; color: {INK}; }}
+    .result .verdict b {{ color: {BLUE}; font-weight: 800; }}
+    .result .nums {{ margin: .45rem 0 0; font-size: .95rem; color: {MUTED}; font-variant-numeric: tabular-nums; }}
 
     @media (max-width: 640px) {{
-      .scale {{ padding: 16px 22px 10px; }}
-      .mk .v {{ font-size: 1.7rem; }}
+      .result .verdict {{ font-size: 1.25rem; }}
       h1.title {{ font-size: 2.1rem; }}
     }}
 
@@ -73,6 +60,19 @@ st.markdown(
     div[data-baseweb="tab-highlight"] {{ background-color: {GREEN} !important; }}
     [data-testid="stSidebar"] {{ border-right: 1px solid {RULE}; }}
     [data-testid="stSidebar"] h3 {{ font-family: 'Bricolage Grotesque', sans-serif; font-size: 1.15rem; margin-top: .4rem; }}
+    .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {{ background: {BG}; }}
+    [data-testid="stSidebar"], [data-testid="stSidebar"] > div {{ background: {SIDE}; }}
+    [data-testid="stSidebar"] {{ border-right: 1px solid {RULE}; }}
+    .stApp, .stApp p, .stApp label, .stApp span, .stApp li, .stApp h1, .stApp h2, .stApp h3, .stApp [data-testid="stWidgetLabel"] p,
+    .stApp [data-testid="stMarkdownContainer"] p, button[data-baseweb="tab"] p {{ color: {INK}; }}
+    .stApp .muted, p.lede, .result .nums, table.t th {{ color: {MUTED}; }}
+    .result .verdict b {{ color: {BLUE}; }}
+    .stApp [data-testid="stSliderThumbValue"], .stApp [data-testid="stTickBarMin"], .stApp [data-testid="stTickBarMax"] {{ color: {GREEN}; }}
+    .stApp [data-testid="stAlert"] p {{ color: inherit; }}
+    header[data-testid="stHeader"] * {{ color: {INK}; }}
+    label[data-testid="stRadioOption"] > div > div:first-child {{ background-color: {BG}; border-color: {MUTED}; }}
+    label[data-testid="stRadioOption"][data-selected="true"] > div > div:first-child {{ background-color: {GREEN}; border-color: {GREEN}; }}
+    [data-testid="stSlider"] div[data-rac][style*="translate"] {{ background-color: {GREEN}; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -91,7 +91,7 @@ def chart_style(ch, height):
             .configure(font=FONT, background="transparent")
             .configure_view(stroke=None)
             .configure_axis(labelColor=MUTED, titleColor=MUTED, labelFontSize=12, titleFontSize=12, titleFontWeight=500,
-                            gridColor="#E6ECE8", domainColor=RULE, tickColor=RULE)
+                            gridColor=GRID, domainColor=RULE, tickColor=RULE)
             .configure_legend(labelColor=INK, labelFontSize=12, titleFontSize=0, orient="top", symbolType="circle"))
 
 
@@ -175,17 +175,7 @@ elif bad:
     st.info("Outside the training range for: " + ", ".join(FEATURE_LABELS[b] for b in bad) +
             ". Linear models extrapolate, so treat this prediction with caution.")
 
-# the scale
-lo_ax = min(0, int(np.floor(min(pred, actual))) - 1)
-hi_ax = max(8, int(np.ceil(max(pred, actual))) + 1)
-
-
-def pos(v):
-    return 100 * (v - lo_ax) / (hi_ax - lo_ax)
-
-
-ticks = "".join(f"<div class='tick' style='left:{pos(t):.2f}%'>{t}%</div>" for t in range(lo_ax, hi_ax + 1))
-gap_l, gap_w = min(pos(pred), pos(actual)), abs(pos(pred) - pos(actual))
+# the result
 if abs(diff) < 0.25:
     verdict = "The model lands close to actual inflation."
 elif diff > 0:
@@ -194,17 +184,8 @@ else:
     verdict = f"The model is <b>{abs(diff):.2f} points below</b> actual inflation."
 st.markdown(
     f"""
-    <div class="scale"><div class="track">
-      <div class="axis"></div>
-      <div class="gap" style="left:{gap_l:.2f}%; width:{gap_w:.2f}%"></div>
-      {ticks}
-      <div class="target" style="left:{pos(2):.2f}%"><span>Fed target 2%</span></div>
-      <div class="dotp" style="left:{pos(pred):.2f}%"></div><div class="dota" style="left:{pos(actual):.2f}%"></div>
-      <div class="mk pred" style="left:{pos(pred):.2f}%"><div class="v">{pred:.2f}%</div><div class="t">{label}</div></div>
-      <div class="mk act" style="left:{pos(actual):.2f}%"><div class="v">{actual:.2f}%</div>
-        <div class="t">Actual, {fmt_date(target, actual_date)}</div></div>
-    </div>
-    <p class="verdict" style="margin-top:.2rem">{verdict}</p></div>
+    <div class="result"><p class="verdict">{verdict}</p>
+    <p class="nums">{label} predicts {pred:.2f}%  |  Actual {actual:.2f}% ({fmt_date(target, actual_date)})</p></div>
     """,
     unsafe_allow_html=True,
 )
@@ -295,7 +276,7 @@ with tab2:
     else:
         st.info("Not enough data for this era.")
     st.markdown("<h2 class='h'>Slope by era</h2>", unsafe_allow_html=True)
-    HL = "style='font-weight:700;background:#EEF3F0'"
+    HL = f"style='font-weight:700;background:{PANEL}'"
     body = "".join(f"<tr {HL if l == pick else ''}><td>{l}</td><td class='r'>{n}</td><td class='r'>{sl:+.2f}</td></tr>" for l, n, sl in era_rows)
     st.markdown(f"<table class='t'><tr><th>Era</th><th class='r'>Months</th><th class='r'>Slope</th></tr>{body}</table>",
                 unsafe_allow_html=True)
