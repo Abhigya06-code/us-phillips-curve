@@ -163,6 +163,19 @@ label, feats = MODELS[model_key]
 st.markdown(f"<div class='muted' style='margin:-.3rem 0 1rem'>Uses: {', '.join(FEATURE_LABELS[f] for f in feats)}</div>",
             unsafe_allow_html=True)
 
+def _r2_cell(v):
+    return f"{v:.2f}".replace("-", "\u2212")
+_hl = f"style='font-weight:700;background:{PANEL}'"
+_rows = "".join(
+    f"<tr {_hl if k == model_key else ''}><td>{MODELS[k][0]}</td>"
+    f"<td class='r'>{_r2_cell(metrics['models'][target][k]['r2_in'])}</td>"
+    f"<td class='r'>{_r2_cell(metrics['models'][target][k]['r2_oos'])}</td></tr>" for k in keys)
+st.markdown(
+    f"<table class='t side'><tr><th>{target_label} model</th><th class='r'>R\u00b2 in-sample</th>"
+    f"<th class='r'>R\u00b2 out-of-sample</th></tr>{_rows}</table>"
+    f"<div class='muted' style='margin:.35rem 0 1rem'>In-sample: 2003 to 2018 training data. Out-of-sample: unseen data from 2019. "
+    f"Below 0 means worse than predicting the test-period average.</div>", unsafe_allow_html=True)
+
 pred = predict(models, target, model_key, inputs)
 actual, actual_date = latest[target]
 diff = pred - actual
