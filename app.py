@@ -258,7 +258,8 @@ with tab1:
 # ============================================================ TAB 2
 with tab2:
     era_labels = [e[0] for e in ERAS]
-    chosen = st.multiselect("Eras", era_labels, default=era_labels)
+    pick = st.radio("Era", era_labels, index=2, horizontal=True)
+    chosen = [pick]
     frames, era_rows = [], []
     for lab, s, e in ERAS:
         x = df.loc[s:e, ["unrate", target]].dropna()
@@ -276,7 +277,7 @@ with tab2:
         pts2 = alt.Chart(allx.reset_index(drop=True)).mark_circle(size=34, opacity=.72).encode(
             x=alt.X("Unemployment:Q", axis=alt.Axis(title="Unemployment rate, %"), scale=alt.Scale(zero=False)),
             y=alt.Y("Inflation:Q", axis=alt.Axis(title=f"{target_label} inflation, % year over year")),
-            color=alt.Color("Era:N", scale=alt.Scale(domain=chosen, range=colors), legend=alt.Legend(columns=3)),
+            color=alt.Color("Era:N", scale=alt.Scale(domain=chosen, range=colors), legend=None),
             tooltip=["Era:N", alt.Tooltip("Unemployment:Q", format=".1f"), alt.Tooltip("Inflation:Q", format=".1f")])
         fit = alt.Chart(pd.DataFrame({"x": [x0, x1], "y": [icpt + slope * x0, icpt + slope * x1]})).mark_line(
             color=INK, strokeWidth=2.4).encode(x="x:Q", y="y:Q")
@@ -292,8 +293,9 @@ with tab2:
             fontWeight=600, fontSize=12, align="right", dy=-10, color=INK).encode(x="x:Q", y="y:Q", text="t:N")
         show(chart_style(alt.layer(band, pts2, vline, fit, t1, t2), 420))
     else:
-        st.info("Select at least one era.")
+        st.info("Not enough data for this era.")
     st.markdown("<h2 class='h'>Slope by era</h2>", unsafe_allow_html=True)
-    body = "".join(f"<tr><td>{l}</td><td class='r'>{n}</td><td class='r'>{sl:+.2f}</td></tr>" for l, n, sl in era_rows)
+    HL = "style='font-weight:700;background:#EEF3F0'"
+    body = "".join(f"<tr {HL if l == pick else ''}><td>{l}</td><td class='r'>{n}</td><td class='r'>{sl:+.2f}</td></tr>" for l, n, sl in era_rows)
     st.markdown(f"<table class='t'><tr><th>Era</th><th class='r'>Months</th><th class='r'>Slope</th></tr>{body}</table>",
                 unsafe_allow_html=True)
