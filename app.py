@@ -240,12 +240,11 @@ with tab2:
     chosen = [pick]
     frames, era_rows = [], []
     for lab, s, e in ERAS:
-        x = df.loc[s:e, ["unrate", target]].dropna()
+        x = df.loc[s:e, ["unrate", target, "nrou"]].dropna()
         if len(x) > 2:
             era_rows.append((lab, len(x), float(np.polyfit(x["unrate"], x[target], 1)[0])))
         if lab in chosen:
             frames.append(x.assign(Era=lab).rename(columns={"unrate": "Unemployment", target: "Inflation"}))
-    nrou = metrics["nrou"]
     if frames:
         allx = pd.concat(frames)
         slope, icpt = np.polyfit(allx["Unemployment"], allx["Inflation"], 1)
@@ -259,12 +258,13 @@ with tab2:
             tooltip=["Era:N", alt.Tooltip("Unemployment:Q", format=".1f"), alt.Tooltip("Inflation:Q", format=".1f")])
         fit = alt.Chart(pd.DataFrame({"x": [x0, x1], "y": [icpt + slope * x0, icpt + slope * x1]})).mark_line(
             color=INK, strokeWidth=2.4).encode(x="x:Q", y="y:Q")
-        band = alt.Chart(pd.DataFrame({"a": [nrou["min"]], "b": [nrou["max"]]})).mark_rect(color=GREEN, opacity=.09).encode(
+        nr_avg, nr_lo, nr_hi = float(allx["nrou"].mean()), float(allx["nrou"].min()), float(allx["nrou"].max())
+        band = alt.Chart(pd.DataFrame({"a": [nr_lo], "b": [nr_hi]})).mark_rect(color=GREEN, opacity=.09).encode(
             x="a:Q", x2="b:Q")
-        vline = alt.Chart(pd.DataFrame({"x": [nrou["latest"]]})).mark_rule(color=GREEN, strokeWidth=2.2).encode(x="x:Q")
+        vline = alt.Chart(pd.DataFrame({"x": [nr_avg]})).mark_rule(color=GREEN, strokeWidth=2.2).encode(x="x:Q")
         ymax = float(allx["Inflation"].max())
-        t1 = alt.Chart(pd.DataFrame({"x": [nrou["latest"] + 0.12], "y": [ymax],
-                                     "t": [f"Long run: natural rate {nrou['latest']:.1f}%"]})).mark_text(
+        t1 = alt.Chart(pd.DataFrame({"x": [nr_avg + 0.12], "y": [ymax],
+                                     "t": [f"Long run: natural rate {nr_avg:.1f}% (era average)"]})).mark_text(
             fontWeight=600, fontSize=12, align="left", color=GREEN).encode(x="x:Q", y="y:Q", text="t:N")
         t2 = alt.Chart(pd.DataFrame({"x": [x1], "y": [icpt + slope * x1],
                                      "t": [f"Short-run fit, slope {slope:.2f}"]})).mark_text(
