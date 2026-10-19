@@ -1,6 +1,6 @@
 import io
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 
 import altair as alt
 import numpy as np
@@ -119,33 +119,41 @@ SHORT = {"unrate": ("Unemployment", "%"), "mich": ("Expected inflation", "%"), "
 
 
 def _get_series(sid, start):
-    """One FRED series via the public CSV endpoint (no API key). Tries both URLs, 2 attempts each."""
+    """One FRED series via the public CSV endpoint (no API key). Tries both URLs once each."""
     last = "unknown error"
     for url in FRED_URLS:
-        for _ in range(2):
-            try:
-                r = requests.get(url, params={"id": sid, "cosd": start}, timeout=(6, 30),
-                                 headers={"User-Agent": "Mozilla/5.0 (compatible; phillips-simulator)"})
-                r.raise_for_status()
-                raw = pd.read_csv(io.StringIO(r.text))
-                s = pd.Series(pd.to_numeric(raw.iloc[:, 1], errors="coerce").values,
-                              index=pd.to_datetime(raw.iloc[:, 0], errors="coerce")).dropna()
-                if len(s):
-                    return s, None
-                last = "empty response"
-            except Exception as e:                      # keep the reason so it can be shown in the sidebar
-                last = f"{type(e).__name__}: {str(e)[:90]}"
+        try:
+            r = requests.get(url, params={"id": sid, "cosd": start}, timeout=(4, 8),
+                             headers={"User-Agent": "Mozilla/5.0 (compatible; phillips-simulator)"})
+            r.raise_for_status()
+            raw = pd.read_csv(io.StringIO(r.text))
+            s = pd.Series(pd.to_numeric(raw.iloc[:, 1], errors="coerce").values,
+                          index=pd.to_datetime(raw.iloc[:, 0], errors="coerce")).dropna()
+            if len(s):
+                return s, None
+            last = "empty response"
+        except Exception as e:                          # keep the reason so it can be shown in the sidebar
+            last = f"{type(e).__name__}: {str(e)[:90]}"
     return None, last
 
 
 @st.cache_data(ttl=3 * 3600, show_spinner=False)
 def fetch_live():
-    """Latest observations of every series. Raises if nothing could be fetched, so failures are never cached."""
+    """Latest observations of every series, waiting at most 12 seconds in total.
+    Raises if nothing arrived, so failures are never cached."""
     start = (pd.Timestamp.today() - pd.DateOffset(months=30)).strftime("%Y-%m-%d")
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        res = dict(zip(LIVE_IDS, ex.map(lambda sid: _get_series(sid, start), LIVE_IDS.values())))
-    data = {k: v[0] for k, v in res.items()}
-    errors = {k: v[1] for k, v in res.items() if v[1]}
+    ex = ThreadPoolExecutor(max_workers=len(LIVE_IDS))
+    futs = {k: ex.submit(_get_series, sid, start) for k, sid in LIVE_IDS.items()}
+    wait(list(futs.values()), timeout=12)
+    ex.shutdown(wait=False, cancel_futures=True)
+    data, errors = {}, {}
+    for k, f in futs.items():
+        if f.done():
+            data[k], err = f.result()
+            if err:
+                errors[k] = err
+        else:
+            data[k], errors[k] = None, "timed out"
     if all(v is None for v in data.values()):
         raise RuntimeError(next(iter(errors.values()), "FRED not reachable"))
     return data, errors
