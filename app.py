@@ -1,14 +1,106 @@
+import io
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+import altair as alt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+import requests
 import streamlit as st
 
-from src.config import (DATA_PATH, TARGETS, MODELS, FEATURE_LABELS, SLIDER_STEPS, ERAS, SERIES, ALL_FEATURES)
+from src.config import (DATA_PATH, TARGETS, MODELS, FEATURE_LABELS, SLIDER_STEPS, ERAS, ALL_FEATURES)
 from src.predict import load_artifacts, predict, out_of_range
 
 st.set_page_config(page_title="US Phillips Curve Simulator", layout="wide")
 
+# ---------------------------------------------------------------- look
+# Dollar green carries structure, blue is always "your scenario", ink is always "what actually happened".
+GREEN, BLUE, INK, MUTED = "#0F5A46", "#2457F5", "#1C2420", "#6A7670"
+PANEL, RULE, AMBER, RED = "#EEF3F0", "#D5DDD8", "#C98A00", "#C8402B"
+FONT = "Hanken Grotesk, Helvetica Neue, Arial, sans-serif"
 
+st.markdown(
+    f"""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&display=swap');
+    html, body, [data-testid="stAppViewContainer"], .stMarkdown, button, input, label {{
+        font-family: {FONT}; color: {INK}; }}
+    .block-container {{ padding-top: 2.4rem; padding-bottom: 3rem; max-width: 1120px; }}
+    header[data-testid="stHeader"] {{ background: transparent; }}
+    footer, .stAppDeployButton {{ visibility: hidden; display: none; }}
+
+    h1.title {{ font-family: 'Bricolage Grotesque', sans-serif; font-weight: 800; font-size: 2.7rem;
+                letter-spacing: -0.03em; line-height: 1.02; margin: 0 0 .5rem; padding: 0; color: {INK}; }}
+    p.lede {{ color: {MUTED}; font-size: 1.05rem; margin: 0 0 1.6rem; max-width: 560px; }}
+    h2.h {{ font-family: 'Bricolage Grotesque', sans-serif; font-weight: 700; font-size: 1.35rem;
+            letter-spacing: -0.015em; margin: 2rem 0 .6rem; padding: 0; }}
+
+    /* the scale: the one thing on this page that is custom */
+    .scale {{ background: {PANEL}; border-radius: 6px; padding: 22px 34px 14px; margin-bottom: .4rem; }}
+    .track {{ position: relative; height: 212px; }}
+    .axis {{ position: absolute; left: 0; right: 0; top: 108px; height: 2px; background: {INK}; }}
+    .gap {{ position: absolute; top: 105px; height: 8px; background: {BLUE}; opacity: .28; border-radius: 4px; }}
+    .tick {{ position: absolute; top: 110px; background: {PANEL}; z-index: 1; transform: translateX(-50%); font-size: .74rem; color: {MUTED};
+             font-variant-numeric: tabular-nums; padding-top: 5px; }}
+    .tick:before {{ content: ""; position: absolute; left: 50%; top: 0; height: 5px; width: 1px; background: {MUTED}; }}
+    .target {{ position: absolute; top: 4px; bottom: 6px; width: 0; border-left: 2px dashed {GREEN}; }}
+    .target span {{ position: absolute; top: 0; left: 8px; font-size: .78rem; font-weight: 600; color: {GREEN};
+                    white-space: nowrap; }}
+    .mk {{ position: absolute; transform: translateX(-50%); text-align: center; white-space: nowrap; }}
+    .mk .v {{ font-family: 'Bricolage Grotesque', sans-serif; font-weight: 800; font-size: 2.3rem;
+              letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }}
+    .mk .t {{ font-size: .8rem; font-weight: 600; margin-top: 3px; }}
+    .mk.pred {{ top: 36px; color: {BLUE}; }}
+    .mk.pred:after {{ content: ""; position: absolute; left: 50%; top: 66px; width: 2px; height: 26px; background: {BLUE}; }}
+    .mk.act {{ top: 120px; padding-top: 30px; color: {INK}; }}
+    .mk.act:before {{ content: ""; position: absolute; left: 50%; top: -1px; width: 2px; height: 30px; background: {INK}; }}
+    .dotp, .dota {{ position: absolute; top: 101px; width: 16px; height: 16px; transform: translateX(-50%); border-radius: 50%; }}
+    .dotp {{ background: {BLUE}; }} .dota {{ background: {INK}; }}
+    p.verdict {{ margin: .9rem 0 0; font-size: 1.02rem; }}
+    p.verdict b {{ font-weight: 700; }}
+
+    @media (max-width: 640px) {{
+      .scale {{ padding: 16px 22px 10px; }}
+      .mk .v {{ font-size: 1.7rem; }}
+      h1.title {{ font-size: 2.1rem; }}
+    }}
+
+    /* tables */
+    table.t {{ border-collapse: collapse; width: 100%; font-size: .93rem; }}
+    table.t th {{ text-align: left; font-weight: 600; color: {MUTED}; padding: 6px 10px 6px 0; border-bottom: 1px solid {INK}; }}
+    table.t td {{ padding: 8px 10px 8px 0; border-bottom: 1px solid {RULE}; font-variant-numeric: tabular-nums; }}
+    table.t .r {{ text-align: right; }}
+    table.t.side {{ font-size: .82rem; }}
+    .muted {{ color: {MUTED}; font-size: .88rem; }}
+
+    /* streamlit controls */
+    button[data-baseweb="tab"] p {{ font-size: 1rem; font-weight: 600; }}
+    div[data-baseweb="tab-highlight"] {{ background-color: {GREEN} !important; }}
+    [data-testid="stSidebar"] {{ border-right: 1px solid {RULE}; }}
+    [data-testid="stSidebar"] h3 {{ font-family: 'Bricolage Grotesque', sans-serif; font-size: 1.15rem; margin-top: .4rem; }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+def show(ch):
+    try:
+        st.altair_chart(ch, width="stretch", theme=None)
+    except TypeError:                      # older Streamlit
+        st.altair_chart(ch, use_container_width=True, theme=None)
+
+
+def chart_style(ch, height):
+    return (ch.properties(height=height)
+            .configure(font=FONT, background="transparent")
+            .configure_view(stroke=None)
+            .configure_axis(labelColor=MUTED, titleColor=MUTED, labelFontSize=12, titleFontSize=12, titleFontWeight=500,
+                            gridColor="#E6ECE8", domainColor=RULE, tickColor=RULE)
+            .configure_legend(labelColor=INK, labelFontSize=12, titleFontSize=0, orient="top", symbolType="circle"))
+
+
+# ---------------------------------------------------------------- data
 @st.cache_data
 def load_data():
     return pd.read_csv(DATA_PATH, index_col=0, parse_dates=True)
@@ -19,174 +111,296 @@ def get_artifacts():
     return load_artifacts()
 
 
+FRED_URLS = ["https://fred.stlouisfed.org/graph/fredgraph.csv", "https://fred.stlouisfed.org/graphs/fredgraph.csv"]
+LIVE_IDS = {"unrate": "UNRATE", "mich": "MICH", "fedfunds": "FEDFUNDS", "wti": "DCOILWTICO",
+            "m2": "M2SL", "cpi": "CPIAUCSL", "core": "CPILFESL"}
+SHORT = {"unrate": ("Unemployment", "%"), "mich": ("Expected inflation", "%"), "fedfunds": ("Fed funds rate", "%"),
+         "wti": ("WTI oil", "$"), "m2_yoy": ("M2 growth", "%")}
+
+
+def _get_series(sid, start):
+    """One FRED series via the public CSV endpoint (no API key). Tries both URLs, 2 attempts each."""
+    last = "unknown error"
+    for url in FRED_URLS:
+        for _ in range(2):
+            try:
+                r = requests.get(url, params={"id": sid, "cosd": start}, timeout=(6, 30),
+                                 headers={"User-Agent": "Mozilla/5.0 (compatible; phillips-simulator)"})
+                r.raise_for_status()
+                raw = pd.read_csv(io.StringIO(r.text))
+                s = pd.Series(pd.to_numeric(raw.iloc[:, 1], errors="coerce").values,
+                              index=pd.to_datetime(raw.iloc[:, 0], errors="coerce")).dropna()
+                if len(s):
+                    return s, None
+                last = "empty response"
+            except Exception as e:                      # keep the reason so it can be shown in the sidebar
+                last = f"{type(e).__name__}: {str(e)[:90]}"
+    return None, last
+
+
+@st.cache_data(ttl=3 * 3600, show_spinner=False)
+def fetch_live():
+    """Latest observations of every series. Raises if nothing could be fetched, so failures are never cached."""
+    start = (pd.Timestamp.today() - pd.DateOffset(months=30)).strftime("%Y-%m-%d")
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        res = dict(zip(LIVE_IDS, ex.map(lambda sid: _get_series(sid, start), LIVE_IDS.values())))
+    data = {k: v[0] for k, v in res.items()}
+    errors = {k: v[1] for k, v in res.items() if v[1]}
+    if all(v is None for v in data.values()):
+        raise RuntimeError(next(iter(errors.values()), "FRED not reachable"))
+    return data, errors
+
+
+def build_latest(df):
+    """Latest value of every scenario input and of both inflation measures.
+    Live from FRED when reachable, otherwise the last values of the saved dataset.
+    Returns ({name: (value, date, is_live)}, number_of_live_series)."""
+    raw, errors = {}, {}
+    last_fail = st.session_state.get("fred_fail_at", 0)
+    if time.time() - last_fail > 120:                   # after a failure, wait 2 minutes before trying again
+        try:
+            raw, errors = fetch_live()
+            st.session_state.pop("fred_fail_at", None)
+        except Exception as e:
+            st.session_state["fred_fail_at"] = time.time()
+            st.session_state["fred_error"] = f"{type(e).__name__}: {str(e)[:120]}"
+    st.session_state["fred_errors"] = errors
+
+    def saved(name):
+        s = df[name].dropna()
+        return float(s.iloc[-1]), s.index[-1], False
+
+    def yoy(s):
+        return None if s is None else (s.pct_change(12) * 100).dropna()
+
+    out, n_live = {}, 0
+    sources = {"unrate": raw.get("unrate"), "mich": raw.get("mich"), "fedfunds": raw.get("fedfunds"),
+               "wti": raw.get("wti"), "m2_yoy": yoy(raw.get("m2")),
+               "cpi_yoy": yoy(raw.get("cpi")), "core_yoy": yoy(raw.get("core"))}
+    for name, s in sources.items():
+        if s is not None and len(s):
+            out[name] = (float(s.iloc[-1]), s.index[-1], True)
+            n_live += 1
+        else:
+            out[name] = saved(name)
+    return out, n_live
+
+
+def fmt_date(name, d):
+    return d.strftime("%d %b %Y") if name == "wti" else d.strftime("%b %Y")
+
+
+def snap(v, lo, hi, step):
+    v = min(max(v, lo), hi)
+    return float(round(round(v / step) * step, 4))
+
+
 df = load_data()
 models, metrics = get_artifacts()
 ranges = metrics["slider_ranges"]
 
-# ---------------- Sidebar ----------------
-st.sidebar.header("Adjust the scenario")
-target_label = st.sidebar.radio("Inflation measure", list(TARGETS))
+# ---------------------------------------------------------------- scenario state
+apply_latest = st.session_state.pop("apply_latest", False)
+if apply_latest:
+    fetch_live.clear()                      # "Latest data" pulls fresh numbers
+with st.spinner("Loading latest data..."):
+    latest, n_live = build_latest(df)
+
+if apply_latest or "scenario_init" not in st.session_state:
+    for f in ALL_FEATURES:
+        lo, hi, _ = ranges[f]
+        st.session_state[f"s_{f}"] = snap(latest[f][0], lo, hi, SLIDER_STEPS[f])
+    st.session_state["scenario_init"] = True
+
+
+def _request_latest():
+    st.session_state["apply_latest"] = True
+
+
+def _typical_values():
+    for f in ALL_FEATURES:
+        st.session_state[f"s_{f}"] = float(ranges[f][2])
+
+
+# ---------------------------------------------------------------- sidebar
+st.sidebar.markdown("### Scenario")
+target_label = st.sidebar.radio("Inflation measure", list(TARGETS), horizontal=True)
 target = TARGETS[target_label]
 
 inputs = {}
 for f in ALL_FEATURES:
-    lo, hi, default = ranges[f]
-    inputs[f] = st.sidebar.slider(FEATURE_LABELS[f], float(lo), float(hi), float(default), SLIDER_STEPS[f])
+    lo, hi, _ = ranges[f]
+    inputs[f] = st.sidebar.slider(FEATURE_LABELS[f], float(lo), float(hi), step=SLIDER_STEPS[f], key=f"s_{f}")
 
-# ---------------- Header ----------------
-st.title("US Phillips Curve Simulator")
+b1, b2 = st.sidebar.columns(2)
+b1.button("Latest data", on_click=_request_latest, type="primary", use_container_width=True)
+b2.button("Typical values", on_click=_typical_values, use_container_width=True)
+
+if n_live > 0:
+    st.sidebar.caption(f"Live from FRED: {n_live} of {len(latest)} series.")
+    for k, msg in st.session_state.get("fred_errors", {}).items():
+        st.sidebar.caption(f"{k}: {msg}")
+else:
+    st.sidebar.caption("FRED could not be reached, so sliders start at the saved dataset. Press Latest data to retry.")
+    if st.session_state.get("fred_error"):
+        st.sidebar.caption(f"Reason: {st.session_state['fred_error']}")
+with st.sidebar.expander("Latest values"):
+    rows = ""
+    for f in ALL_FEATURES:
+        v, d, live = latest[f]
+        name, unit = SHORT[f]
+        shown = f"${v:,.2f}" if unit == "$" else f"{v:.2f}%"
+        rows += f"<tr><td>{name}</td><td class='r'>{shown}</td><td class='r'>{fmt_date(f, d)}{'' if live else '*'}</td></tr>"
+    st.markdown(f"<table class='t side'><tr><th>Series</th><th class='r'>Value</th><th class='r'>As of</th></tr>{rows}</table>",
+                unsafe_allow_html=True)
+    if n_live < len(latest):
+        st.caption("* saved dataset value")
+
+# ---------------------------------------------------------------- header
+st.markdown("<h1 class='title'>US Phillips Curve Simulator</h1>"
+            "<p class='lede'>Set the economic conditions and see what each model predicts for inflation.</p>",
+            unsafe_allow_html=True)
 if metrics.get("stub"):
     st.warning("STUB DATA: synthetic placeholder numbers. Replace data/ and artifacts/ with the Colab outputs before presenting.")
-st.write(
-    "Built on US macro data from FRED. Compares the classic Phillips Curve, an expectations-augmented "
-    "version, an augmented model with supply and policy shocks, and a Random Forest, to show why a "
-    "central bank cannot rely on a single stable curve to control inflation."
+
+# ---------------------------------------------------------------- model + prediction
+keys = [k for k in MODELS if k != "full_ols"]
+model_key = st.radio("Model", keys, format_func=lambda k: MODELS[k][0], horizontal=True)
+label, feats = MODELS[model_key]
+st.markdown(f"<div class='muted' style='margin:-.3rem 0 1rem'>Uses: {', '.join(FEATURE_LABELS[f] for f in feats)}</div>",
+            unsafe_allow_html=True)
+
+pred = predict(models, target, model_key, inputs)
+actual, actual_date, actual_live = latest[target]
+diff = pred - actual
+
+bad = out_of_range(metrics, inputs, feats)
+if bad and model_key == "rf":
+    st.warning("Outside the training range for: " + ", ".join(FEATURE_LABELS[b] for b in bad) +
+               ". A Random Forest cannot extrapolate, so this prediction is capped at the edge of what it has seen.")
+elif bad:
+    st.info("Outside the training range for: " + ", ".join(FEATURE_LABELS[b] for b in bad) +
+            ". Linear models extrapolate, so treat this prediction with caution.")
+
+# the scale
+lo_ax = min(0, int(np.floor(min(pred, actual))) - 1)
+hi_ax = max(8, int(np.ceil(max(pred, actual))) + 1)
+
+
+def pos(v):
+    return 100 * (v - lo_ax) / (hi_ax - lo_ax)
+
+
+ticks = "".join(f"<div class='tick' style='left:{pos(t):.2f}%'>{t}%</div>" for t in range(lo_ax, hi_ax + 1))
+gap_l, gap_w = min(pos(pred), pos(actual)), abs(pos(pred) - pos(actual))
+if abs(diff) < 0.25:
+    verdict = "The model lands close to actual inflation."
+elif diff > 0:
+    verdict = f"The model is <b>{diff:.2f} points above</b> actual inflation."
+else:
+    verdict = f"The model is <b>{abs(diff):.2f} points below</b> actual inflation."
+st.markdown(
+    f"""
+    <div class="scale"><div class="track">
+      <div class="axis"></div>
+      <div class="gap" style="left:{gap_l:.2f}%; width:{gap_w:.2f}%"></div>
+      {ticks}
+      <div class="target" style="left:{pos(2):.2f}%"><span>Fed target 2%</span></div>
+      <div class="dotp" style="left:{pos(pred):.2f}%"></div><div class="dota" style="left:{pos(actual):.2f}%"></div>
+      <div class="mk pred" style="left:{pos(pred):.2f}%"><div class="v">{pred:.2f}%</div><div class="t">{label}</div></div>
+      <div class="mk act" style="left:{pos(actual):.2f}%"><div class="v">{actual:.2f}%</div>
+        <div class="t">Actual, {fmt_date(target, actual_date)}{'' if actual_live else ' (saved)'}</div></div>
+    </div>
+    <p class="verdict" style="margin-top:.2rem">{verdict}</p></div>
+    """,
+    unsafe_allow_html=True,
 )
 
-tab1, tab2, tab3, tab4 = st.tabs(["Predictor", "Short-run & long-run curve", "Why the Classic Curve Fails", "Data, method & limits"])
+tab1, tab2 = st.tabs(["History", "Short-run and long-run curve"])
 
 # ============================================================ TAB 1
 with tab1:
-    st.subheader("Model")
-    keys = list(MODELS)
-    model_key = st.radio("Choose a model", keys, format_func=lambda k: MODELS[k][0], horizontal=True)
-    label, feats = MODELS[model_key]
-    mm = metrics["models"][target][model_key]
-
-    pred = predict(models, target, model_key, inputs)
-    st.caption(
-        f"Uses: {', '.join(FEATURE_LABELS[f] for f in feats)}. "
-        f"R\u00b2 in-sample = {mm['r2_in']:.2f}; out-of-sample (test {metrics['split']['test_start']} onward) = "
-        f"{mm['r2_oos']:.2f}, RMSE = {mm['rmse_oos']:.2f} pp."
-    )
-    bad = out_of_range(metrics, inputs, feats)
-    if bad and model_key == "rf":
-        st.warning("Outside the training range for: " + ", ".join(FEATURE_LABELS[b] for b in bad) +
-                   ". A Random Forest cannot extrapolate, so this prediction is capped at the edge of what it has seen.")
-    elif bad:
-        st.info("Outside the training range for: " + ", ".join(FEATURE_LABELS[b] for b in bad) +
-                ". Linear models extrapolate, so treat this prediction with caution.")
-
-    st.metric(f"Predicted {target_label} inflation", f"{pred:.2f}%")
-
     yearly = df.loc[metrics["sample"]["start"]:, target].dropna().resample("YE").mean()
-    years = yearly.index.year
-    fig, ax = plt.subplots(figsize=(11, 6.5))
-    ax.plot(years, yearly.values, marker="o", color="#4C78A8", lw=1.8, ms=5, label="Historical inflation (annual avg)", zorder=3)
-    ax.axhline(pred, color="crimson", ls="--", lw=2.2, label=f"Your prediction ({pred:.2f}%)", zorder=2)
-    ax.scatter([years.max() + 1], [pred], color="crimson", s=130, marker="D", zorder=5)
-    ax.axhline(0, color="gray", lw=0.6)
-    ax.set_title(f"Model: {label}  |  Predicted {target_label}: {pred:.2f}%", fontsize=12, pad=12)
-    ax.set_xlabel("Year"); ax.set_ylabel("Inflation (% YoY)")
+    hist = pd.DataFrame({"Year": yearly.index.year, "Inflation": yearly.values})
+    xr = int(hist["Year"].max()) + 1
+    y_lo = min(hist["Inflation"].min(), pred, actual, 0) - 0.8
+    y_hi = max(hist["Inflation"].max(), pred, actual) + 1.4
 
-    # (year, text, offset in points). Tune offsets by eye.
-    episodes = [
-        (2009, "2008-09: Global Financial Crisis\nDemand collapse \u2192 inflation turns negative", (-60, -70)),
-        (2015, "2014-15: Oil price crash\n(shale oversupply) \u2192 near-zero inflation", (10, -70)),
-        (2020, "2020: COVID-19 lockdowns\nDemand shock, muted annual average", (-150, 60)),
-        (2022, "2022: Reopening demand surge +\nUkraine war oil shock \u2192 inflation peaks", (-210, 10)),
-        (2024, "2023-24: Aggressive Fed rate hikes\npull inflation back down", (-20, 80)),
-    ]
-    for yr, text, off in episodes:
-        if yr in years:
-            yv = float(yearly[years == yr].iloc[0])
-            ax.annotate(text, xy=(yr, yv), xytext=off, textcoords="offset points", fontsize=8, color="#333333",
-                        arrowprops=dict(arrowstyle="->", color="gray", lw=1), annotation_clip=False,
-                        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.85))
-    ax.legend(loc="upper left")
-    ax.set_ylim(min(yearly.min(), pred) - 3, max(yearly.max(), pred) + 3)
-    plt.tight_layout()
-    st.pyplot(fig)
-    st.caption("Annotations mark major US macro episodes and the demand/supply forces behind each swing.")
+    base = alt.Chart(hist).encode(x=alt.X("Year:Q", axis=alt.Axis(format="d", values=list(range(int(hist["Year"].min()) + 1, xr, 2)), title=None),
+                                          scale=alt.Scale(domain=[hist["Year"].min() - 0.5, xr + 3.2], nice=False)),
+                                  y=alt.Y("Inflation:Q", axis=alt.Axis(title=f"{target_label} inflation, % year over year"),
+                                          scale=alt.Scale(domain=[y_lo, y_hi], nice=False)))
+    line = base.mark_line(color=INK, strokeWidth=2.2)
+    pts = base.mark_circle(color=INK, size=36, opacity=0).encode(tooltip=[alt.Tooltip("Year:Q", format="d"),
+                                                                       alt.Tooltip("Inflation:Q", format=".2f")])
+    lines = pd.DataFrame({"y": [2.0, pred], "kind": ["target", "pred"]})
+    rules = alt.Chart(lines).mark_rule(strokeDash=[5, 4], strokeWidth=1.6).encode(
+        y="y:Q", color=alt.Color("kind:N", scale=alt.Scale(domain=["target", "pred"], range=[GREEN, BLUE]), legend=None))
+    ends = pd.DataFrame({"x": [xr + 0.2, xr + 0.2, xr + 0.2],
+                         "y": [pred + (0.35 if pred >= actual else -0.35), actual + (-0.35 if pred >= actual else 0.35), 2.0 - 0.4],
+                         "text": [f"{pred:.2f}%  scenario", f"{actual:.2f}%  actual", "2% target"],
+                         "c": [BLUE, INK, GREEN]})
+    labels = alt.Chart(ends).mark_text(fontWeight=600, fontSize=12, baseline="middle", align="left").encode(
+        x="x:Q", y="y:Q", text="text:N", color=alt.Color("c:N", scale=None))
+    marks = alt.Chart(pd.DataFrame({"x": [xr, xr], "y": [pred, actual], "c": [BLUE, INK]})).mark_point(
+        filled=True, size=110).encode(x="x:Q", y="y:Q", color=alt.Color("c:N", scale=None))
+
+    eps = [(2009, "Financial crisis", "below"), (2015, "Oil price crash", "below"), (2020, "COVID-19", "below"),
+           (2022, "Reopening and Ukraine war", "above"), (2024, "Fed rate hikes", "hikes")]
+    ep_rows = []
+    for yr, txt, side in eps:
+        m = hist[hist["Year"] == yr]
+        if len(m):
+            if side == "hikes":
+                ep_rows.append({"x": yr + 0.3, "y": float(m["Inflation"].iloc[0]) + 1.5, "text": txt})
+            else:
+                ep_rows.append({"x": yr, "y": float(m["Inflation"].iloc[0]) + (0.75 if side == "above" else -0.6), "text": txt})
+    ep = alt.Chart(pd.DataFrame(ep_rows)).mark_text(fontSize=11.5, color=MUTED).encode(
+        x="x:Q", y="y:Q", text="text:N") if ep_rows else None
+
+    layers = [rules, line, pts, marks, labels] + ([ep] if ep is not None else [])
+    show(chart_style(alt.layer(*layers), 380))
+    st.markdown("<div class='muted'>Models are fitted on 2003 to 2018 and tested from 2019.</div>", unsafe_allow_html=True)
 
 # ============================================================ TAB 2
 with tab2:
-    st.subheader("Short-run curve and the natural rate")
-    st.write("Each dot is one month. The short-run curve is the fitted line; the long-run curve is vertical at the "
-             "CBO natural rate of unemployment (NROU), the level at which only expected inflation remains.")
     era_labels = [e[0] for e in ERAS]
-    chosen = st.multiselect("Eras to include", era_labels, default=era_labels)
-
-    fig2, ax2 = plt.subplots(figsize=(10, 5.5))
-    cmap = plt.get_cmap("tab10")
-    pts = []
-    for i, (lab, s, e) in enumerate(ERAS):
-        if lab not in chosen:
-            continue
+    chosen = st.multiselect("Eras", era_labels, default=era_labels)
+    frames, era_rows = [], []
+    for lab, s, e in ERAS:
         x = df.loc[s:e, ["unrate", target]].dropna()
-        ax2.scatter(x["unrate"], x[target], s=14, alpha=0.65, color=cmap(i), label=lab)
-        pts.append(x)
-    if pts:
-        allx = pd.concat(pts)
-        if len(allx) > 2:
-            b, a = np.polyfit(allx["unrate"], allx[target], 1)
-            xs = np.linspace(allx["unrate"].min(), allx["unrate"].max(), 50)
-            ax2.plot(xs, a + b * xs, color="black", lw=2, label=f"Short-run fit (slope {b:.2f})")
+        if len(x) > 2:
+            era_rows.append((lab, len(x), float(np.polyfit(x["unrate"], x[target], 1)[0])))
+        if lab in chosen:
+            frames.append(x.assign(Era=lab).rename(columns={"unrate": "Unemployment", target: "Inflation"}))
     nrou = metrics["nrou"]
-    ax2.axvspan(nrou["min"], nrou["max"], color="gray", alpha=0.15, label="NROU range over history")
-    ax2.axvline(nrou["latest"], color="crimson", lw=2, label=f"Long-run curve at NROU = {nrou['latest']:.1f}%")
-    ax2.set_xlabel("Unemployment rate (%)"); ax2.set_ylabel(f"{target_label} inflation (% YoY)")
-    ax2.legend(fontsize=8, loc="upper right")
-    plt.tight_layout()
-    st.pyplot(fig2)
-
-# ============================================================ TAB 3
-with tab3:
-    st.subheader("Why the Classic Curve Fails")
-    st.write("Each block tests one hypothesis from Review 1 using the numbers computed in the Colab notebook.")
-
-    st.markdown("**Model comparison** (train through " + metrics["split"]["train_end"] +
-                ", test from " + metrics["split"]["test_start"] + ")")
-    rows = [{"Model": MODELS[k][0], "R\u00b2 in-sample": v["r2_in"], "R\u00b2 out-of-sample": v["r2_oos"],
-             "RMSE out-of-sample (pp)": v["rmse_oos"]} for k, v in metrics["models"][target].items()]
-    st.dataframe(pd.DataFrame(rows).round(3))
-
-    # H1
-    st.markdown("**H1: The curve is not one stable relationship.**")
-    sp = pd.DataFrame(metrics["subperiods"])
-    fig3, ax3 = plt.subplots(figsize=(9, 4))
-    ax3.bar(sp["era"], sp["slope_classic"], yerr=1.96 * sp["se_classic"], capsize=4, color="#4C78A8")
-    ax3.axhline(0, color="gray", lw=0.8)
-    ax3.set_ylabel("Slope of inflation on unemployment"); plt.xticks(rotation=20, ha="right")
-    plt.tight_layout(); st.pyplot(fig3)
-    st.caption(f"Classic slope ranges from {sp['slope_classic'].min():.2f} to {sp['slope_classic'].max():.2f} "
-               "across eras (bars show 95% intervals, HAC standard errors). Headline CPI used for the era test.")
-
-    # H2
-    st.markdown("**H2: The natural rate is a moving target.**")
-    nr = df["nrou"].dropna()
-    fig4, ax4 = plt.subplots(figsize=(9, 3.5))
-    ax4.plot(nr.index, nr.values, label="NROU (CBO)")
-    ax4.plot(df.index, df["unrate"], alpha=0.5, label="Unemployment rate")
-    ax4.legend(); ax4.set_ylabel("%"); plt.tight_layout(); st.pyplot(fig4)
-    st.caption(f"NROU moves between {metrics['nrou']['min']:.1f}% and {metrics['nrou']['max']:.1f}%, "
-               "so the unemployment gap is an uncertain policy signal.")
-
-    # H3, H4
-    c1, c2 = st.columns(2)
-    o, ex = metrics["oil"], metrics["expectations"]
-    with c1:
-        st.markdown("**H3: Supply shocks shift the curve on their own.**")
-        st.metric("Out-of-sample R\u00b2 gain from adding oil", f"{o['r2_oos_gain']:+.3f}")
-        st.caption(f"Oil coefficient {o['coef_wti']:.3f} (t = {o['t_wti']:.1f}).")
-    with c2:
-        st.markdown("**H4: Expectations may matter more than the tradeoff.**")
-        st.metric("Out-of-sample R\u00b2 gain from adding expectations", f"{ex['r2_oos_gain']:+.3f}")
-        st.caption(f"Michigan coefficient {ex['coef_mich']:.3f} (t = {ex['t_mich']:.1f}).")
-
-# ============================================================ TAB 4
-with tab4:
-    st.subheader("Data")
-    st.table(pd.DataFrame({"Variable": list(SERIES), "FRED ID": list(SERIES.values())}))
-    st.write(f"Model sample: {metrics['sample']['start']} to {metrics['sample']['end']} "
-             f"({metrics['sample']['n']} monthly observations). Daily and quarterly series converted to monthly; "
-             "inflation is year-over-year; M2 enters as YoY growth.")
-    st.subheader("Limits")
-    st.markdown(
-        "- The Fed's policy rate responds to inflation, so it is context, not an independent cause.\n"
-        "- The natural rate is estimated (CBO), not observed.\n"
-        "- Policy works with lags, so a simulator cannot show timing.\n"
-        "- Monthly year-over-year inflation is highly persistent; we use HAC standard errors and out-of-sample tests.\n"
-        "- Random Forest cannot extrapolate beyond the data it has seen.\n"
-        "- Aggregate regressions can understate the true slope (Furlanetto & Lepetit, 2024)."
-    )
+    if frames:
+        allx = pd.concat(frames)
+        slope, icpt = np.polyfit(allx["Unemployment"], allx["Inflation"], 1)
+        x0, x1 = float(allx["Unemployment"].min()), float(allx["Unemployment"].max())
+        palette = [GREEN, BLUE, AMBER, MUTED, RED]
+        colors = [palette[era_labels.index(l) % 5] for l in chosen]
+        pts2 = alt.Chart(allx.reset_index(drop=True)).mark_circle(size=34, opacity=.72).encode(
+            x=alt.X("Unemployment:Q", axis=alt.Axis(title="Unemployment rate, %"), scale=alt.Scale(zero=False)),
+            y=alt.Y("Inflation:Q", axis=alt.Axis(title=f"{target_label} inflation, % year over year")),
+            color=alt.Color("Era:N", scale=alt.Scale(domain=chosen, range=colors), legend=alt.Legend(columns=3)),
+            tooltip=["Era:N", alt.Tooltip("Unemployment:Q", format=".1f"), alt.Tooltip("Inflation:Q", format=".1f")])
+        fit = alt.Chart(pd.DataFrame({"x": [x0, x1], "y": [icpt + slope * x0, icpt + slope * x1]})).mark_line(
+            color=INK, strokeWidth=2.4).encode(x="x:Q", y="y:Q")
+        band = alt.Chart(pd.DataFrame({"a": [nrou["min"]], "b": [nrou["max"]]})).mark_rect(color=GREEN, opacity=.09).encode(
+            x="a:Q", x2="b:Q")
+        vline = alt.Chart(pd.DataFrame({"x": [nrou["latest"]]})).mark_rule(color=GREEN, strokeWidth=2.2).encode(x="x:Q")
+        ymax = float(allx["Inflation"].max())
+        t1 = alt.Chart(pd.DataFrame({"x": [nrou["latest"] + 0.12], "y": [ymax],
+                                     "t": [f"Long run: natural rate {nrou['latest']:.1f}%"]})).mark_text(
+            fontWeight=600, fontSize=12, align="left", color=GREEN).encode(x="x:Q", y="y:Q", text="t:N")
+        t2 = alt.Chart(pd.DataFrame({"x": [x1], "y": [icpt + slope * x1],
+                                     "t": [f"Short-run fit, slope {slope:.2f}"]})).mark_text(
+            fontWeight=600, fontSize=12, align="right", dy=-10, color=INK).encode(x="x:Q", y="y:Q", text="t:N")
+        show(chart_style(alt.layer(band, pts2, vline, fit, t1, t2), 420))
+    else:
+        st.info("Select at least one era.")
+    st.markdown("<h2 class='h'>Slope by era</h2>", unsafe_allow_html=True)
+    body = "".join(f"<tr><td>{l}</td><td class='r'>{n}</td><td class='r'>{sl:+.2f}</td></tr>" for l, n, sl in era_rows)
+    st.markdown(f"<table class='t'><tr><th>Era</th><th class='r'>Months</th><th class='r'>Slope</th></tr>{body}</table>",
+                unsafe_allow_html=True)
